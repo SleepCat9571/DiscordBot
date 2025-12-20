@@ -1,3 +1,20 @@
+from flask import Flask
+import threading
+
+# Renderで動かすためのダミーサーバー
+app = Flask('')
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_web():
+    app.run(host='0.0.0.0', port=8080)
+
+# スレッドでWebサーバーを動かす
+threading.Thread(target=run_web).start()
+
+# --- ここから下に、今までのDiscordボットのコードを貼る ---
+
 import discord
 from discord.ext import commands, tasks
 from datetime import datetime
@@ -50,5 +67,6 @@ async def on_ready():
     print(f"--- 起動完了: {bot.user.name} ---")
     if not scheduled_announcements.is_running():
         scheduled_announcements.start()
+
 
 bot.run(TOKEN)
