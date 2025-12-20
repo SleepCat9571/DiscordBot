@@ -85,3 +85,86 @@ if TOKEN:
     bot.run(TOKEN)
 else:
     print("エラー: DISCORD_BOT_TOKEN が設定されていません。")
+
+import discord
+from discord.ext import commands, tasks
+from datetime import datetime, date
+import os
+import requests # 天気取得用に追加
+from flask import Flask
+import threading
+
+# --- 1. Render用ダミーサーバー ---
+app = Flask('')
+@app.route('/')
+def home(): return "Bot is running!"
+def run_web(): app.run(host='0.0.0.0', port=8080)
+threading.Thread(target=run_web).start()
+
+# --- 2. 設定 ---
+intents = discord.Intents.default()
+intents.members = True
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID")) if os.getenv("CHANNEL_ID") else None
+
+# カウントダウンの目標日 (例: 2026年1月1日)
+TARGET_DATE = date(2026, 1, 1) 
+# 天気予報の地域コード (130000 は東京都)
+AREA_CODE = "130000" 
+
+# --- 3. 複雑な条件の通知タスク ---
+@tasks.loop(seconds=60)
+async def super_announcement():
+    if CHANNEL_ID is None: return
+    
+    now = datetime.now()
+    current_time = now.strftime('%H:%M')
+    channel = bot.get_channel(CHANNEL_ID)
+    if not channel: return
+
+    # 毎日朝 08:00 に実行
+    if current_time == "08:00":
+        
+        # 【機能2: 特定の日付 (例: お正月)】
+        if now.month == 1 and now.day == 1:
+            await channel.send("🌅 あけましておめでとうございます！今年もよろしくお願いします！")
+
+        # 【機能3: カウントダウン】
+        today = date.today()
+        diff = (TARGET_DATE - today).days
+        if diff > 0:
+            await channel.send(f"📅 【カウントダウン】目標の日まであと {diff} 日です！")
+        elif diff == 0:
+            await channel.send("🎊 【当日】ついに目標の日が来ました！")
+
+        # 【機能4: 天気予報 (気象庁APIから取得)】
+        try:
+            url = f"https://www.jma.go.jp/bosai/forecast/data/forecast/{AREA_CODE}.json"
+            response = requests.get(url)
+            data = response.json()
+            # 明日の天気予報を取得
+            weather_text = data[0]['timeSeries'][0]['areas'][0]['weathers'][0]
+            
+            msg = f"☀️ 今日の天気予報：{weather_text}\n"
+            if "雨" in weather_text:
+                msg += "☔ 今日は雨が降りそうです。傘を忘れずに！"
+            await channel.send(msg)
+        except Exception as e:
+            print(f"天気取得エラー: {e}")
+
+# --- 4. 起動時・入室時 ---
+@bot.event
+async def on_member_join(member):
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel: await channel.send(f"ようこそ {member.mention} さん！🎉")
+
+@bot.event
+async def on_ready():
+    print(f"起動完了: {bot.user.name}")
+    if not super_announcement.is_running():
+        super_announcement.start()
+
+bot.run(TOKEN)
