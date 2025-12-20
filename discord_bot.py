@@ -168,3 +168,36 @@ async def on_ready():
         super_announcement.start()
 
 bot.run(TOKEN)
+
+# --- コードの上のほう（intents設定のあたり）に追加 ---
+from discord import app_commands # スラッシュコマンド用
+
+# --- ボットクラスの定義のすぐ下に追加 ---
+tree = bot.tree
+
+# --- 2. スラッシュコマンド /help の作成 ---
+@tree.command(name="help", description="ボットの使い方を表示します")
+async def help_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🤖 ボット機能ガイド",
+        description="このボットで利用可能な機能一覧です。",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="/help", value="このメニューを表示します", inline=False)
+    embed.add_field(name="毎日 08:00", value="天気予報とカウントダウンを通知します", inline=False)
+    embed.add_field(name="毎日 12:00", value="お昼の挨拶をします", inline=False)
+    embed.add_field(name="毎月 1日", value="コミュニティの設立月数をお祝いします", inline=False)
+    embed.add_field(name="自動入室挨拶", value="新しいメンバーに挨拶します", inline=False)
+    
+    await interaction.response.send_message(embed=embed)
+
+# --- 3. 起動時にコマンドを「同期」させる設定 ---
+# on_ready の中身を以下のように書き換えてください
+@bot.event
+async def on_ready():
+    # スラッシュコマンドをDiscord側に登録する「同期」作業
+    await tree.sync()
+    print(f"--- 起動完了: {bot.user.name} ---")
+    print("スラッシュコマンドの同期が完了しました")
+    if not super_announcement.is_running():
+        super_announcement.start()
