@@ -35,41 +35,46 @@ class MyBot(commands.Bot):
 
     async def setup_hook(self):
         await self.tree.sync()
-        self.scheduled_task.start()
+        self.scheduled_task.start() # クラス内のタスクを開始
 
-    # 起動完了時
     async def on_ready(self):
-        print(f"Logged in as {self.user.name}")
+        print(f"✅ Logged in as {self.user.name}")
         await self.change_presence(activity=discord.Game(name="/help を見てね"))
 
-# ボットのインスタンス（本体）を作成
+    # 定期タスクをクラスの中に定義
+    @tasks.loop(seconds=60)
+    async def scheduled_task(self):
+        jst = timezone(timedelta(hours=9), 'JST')
+        now = datetime.now(jst)
+        current_time = now.strftime('%H:%M')
+        
+        if current_time == "08:00":
+            ch = self.get_channel(MAIN_CH)
+            if ch: await ch.send("🌅 おはようございます！8時になりました。今日の天気を確認しましょう。")
+
+# ボットの作成
 bot = MyBot()
 
-# --- 4. イベント処理 (クラスの外に記述) ---
+# --- 4. イベント処理 ---
 
-# 新規メンバー参加時
 @bot.event
 async def on_member_join(member):
     target_ch = bot.get_channel(WELCOME_CH) or bot.get_channel(MAIN_CH)
     if target_ch:
         await target_ch.send(f"🎊 {member.mention} さん、サーバーへようこそ！")
 
-# ボイスチャット(VC)入退室ログ
 @bot.event
 async def on_voice_state_update(member, before, after):
     target_ch = bot.get_channel(LOG_CH) or bot.get_channel(MAIN_CH)
     if not target_ch: return
-    
     if before.channel is None and after.channel is not None:
         await target_ch.send(f"🎤 **{member.display_name}** が **{after.channel.name}** に入室")
     elif before.channel is not None and after.channel is None:
         await target_ch.send(f"👋 **{member.display_name}** が **{before.channel.name}** から退出")
 
-# メッセージ監視（禁止用語など）
 @bot.event
 async def on_message(message):
     if message.author.bot: return
-    
     if any(word in message.content for word in BAD_WORDS):
         try:
             await message.author.timeout(timedelta(minutes=10))
@@ -78,16 +83,13 @@ async def on_message(message):
             await log_ch.send(f"🛡️ **ミュート**: {message.author.mention} が禁止用語を使用。")
             return
         except: pass
-    
-    # 旗リアクションの代わりの自動翻訳テスト（文字が含まれていれば反応する等も可）
     await bot.process_commands(message)
 
-# --- 5. スラッシュコマンド ---
+# --- 5. コマンド定義 ---
 
 @bot.tree.command(name="help", description="機能一覧")
 async def help_cmd(interaction: discord.Interaction):
     embed = discord.Embed(title="🚀 ボット機能ガイド", color=discord.Color.blue())
-    embed.add_field(name="チャンネル設定", value=f"メイン: <#{MAIN_CH}>\nログ: <#{LOG_CH}>\n挨拶: <#{WELCOME_CH}>", inline=False)
     embed.add_field(name="コマンド", value="`/omikuji` `/clear` `/slot` `/poll` `/remind`", inline=False)
     await interaction.response.send_message(embed=embed)
 
@@ -97,24 +99,13 @@ async def clear_cmd(interaction: discord.Interaction, amount: int):
     await interaction.response.defer(ephemeral=True)
     deleted = await interaction.channel.purge(limit=amount)
     await interaction.followup.send(f"🧹 {len(deleted)}件削除しました。", ephemeral=True)
-    log_ch = bot.get_channel(LOG_CH)
-    if log_ch: await log_ch.send(f"🧹 {interaction.user.name} が {interaction.channel.name} で {len(deleted)}件削除。")
 
 @bot.tree.command(name="omikuji", description="おみくじ")
 async def omikuji_cmd(interaction: discord.Interaction):
     res = random.choice(["大吉🌟", "中吉✨", "小吉😊", "吉🍀", "凶☁️"])
     await interaction.response.send_message(f"🔮 運勢: **{res}**")
 
-# --- 6. 定期タスク ---
-@tasks.loop(seconds=60)
-async def scheduled_task():
-    jst = timezone(timedelta(hours=9), 'JST')
-    now = datetime.now(jst)
-    if now.strftime('%H:%M') == "08:00":
-        ch = bot.get_channel(MAIN_CH)
-        if ch: await ch.send("🌅 おはようございます！8時になりました。")
-
-# --- 7. 実行 ---
+# --- 6. 実行 ---
 if __name__ == "__main__":
     threading.Thread(target=run_web).start()
     if TOKEN:
