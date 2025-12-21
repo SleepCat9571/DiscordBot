@@ -1,203 +1,109 @@
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
-from datetime import datetime
+from datetime import datetime, date
 import os
-from flask import Flask
+import requests
 import threading
+from flask import Flask
 
-# --- 1. Render用のダミーWebサーバー設定 ---
-# これがないとRenderの無料枠では10分ほどで停止してしまいます
+# ==========================================
+# 1. 外部サービス・環境設定
+# ==========================================
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID")) if os.getenv("CHANNEL_ID") else None
+TARGET_DATE = date(2026, 1, 1)  # カウントダウン目標
+AREA_CODE = "130000"           # 天気地域（東京）
+
+# Render用ダミーサーバー
 app = Flask('')
-
 @app.route('/')
-def home():
-    return "Bot is running!"
+def home(): return "Bot is running!"
 
 def run_web():
-    # Renderは8080ポートを期待することが多いため
     app.run(host='0.0.0.0', port=8080)
 
-# 別スレッドでWebサーバーを起動
-threading.Thread(target=run_web).start()
+# ==========================================
+# 2. ボットクラスの定義
+# ==========================================
+class MyBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.members = True
+        intents.message_content = True
+        super().__init__(command_prefix="!", intents=intents)
 
-# --- 2. Discordボットの基本設定 ---
-intents = discord.Intents.default()
-intents.members = True          # 入室検知用
-intents.message_content = True  # メッセージ読み取り用
+    async def setup_hook(self):
+        # スラッシュコマンドを同期
+        await self.tree.sync()
+        # 定期実行タスクを開始
+        self.super_announcement.start()
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+    # --- 定期通知タスク ---
+    @tasks.loop(seconds=60)
+    async def super_announcement(self):
+        if not CHANNEL_ID: return
+        
+        now = datetime.now()
+        current_time = now.strftime('%H:%M')
+        channel = self.get_channel(CHANNEL_ID)
+        if not channel: return
 
-# 環境変数から設定を読み込む（Renderの管理画面で設定するもの）
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-# チャンネルIDは数値である必要があるため int() で変換
-CHANNEL_ID_STR = os.getenv("CHANNEL_ID")
-CHANNEL_ID = int(CHANNEL_ID_STR) if CHANNEL_ID_STR else None
+        if current_time == "08:00":
+            # 2. 特定日通知
+            if now.month == 1 and now.day == 1:
+                await channel.send("🌅 あけましておめでとうございます！")
 
-# --- 3. 定期通知機能 ---
-@tasks.loop(seconds=60)
-async def scheduled_announcements():
-    if CHANNEL_ID is None:
-        return
-
-    now = datetime.now()
-    current_time = now.strftime('%H:%M')
-
-    # 【毎日12:00の通知】
-    if current_time == "12:00":
-        channel = bot.get_channel(CHANNEL_ID)
-        if channel:
-            await channel.send("こんにちは！ご飯を食べましたか？")
-            print(f"[{now}] 12:00の挨拶を送信しました。")
-
-    # 【毎月1日の 09:00 の通知】
-    if now.day == 1 and current_time == "09:00":
-        channel = bot.get_channel(CHANNEL_ID)
-        if channel:
-            guild = channel.guild
-            # サーバー設立日との差分を計算
-            created_at = guild.created_at.replace(tzinfo=None)
-            months_old = (now.year - created_at.year) * 12 + (now.month - created_at.month)
+            # 3. カウントダウン
+            diff = (TARGET_DATE - date.today()).days
+            countdown_msg = f"📅 目標日まであと {diff} 日です！" if diff > 0 else "🎊 当日です！"
             
-            await channel.send(f"✨【記念日】今日でコミュニティ誕生から {months_old + 1} か月目です！おめでとうございます！")
-            print(f"[{now}] 1ヶ月記念メッセージを送信しました。")
+            # 4. 天気予報
+            try:
+                url = f"https://www.jma.go.jp/bosai/forecast/data/forecast/{AREA_CODE}.json"
+                data = requests.get(url).json()
+                weather = data[0]['timeSeries'][0]['areas'][0]['weathers'][0]
+                weather_msg = f"☀️ 今日の天気：{weather}"
+                if "雨" in weather: weather_msg += " ☔傘を忘れずに！"
+            except:
+                weather_msg = "天気情報の取得に失敗しました。"
 
-# --- 4. ウェルカムメッセージ機能 ---
+            await channel.send(f"{countdown_msg}\n{weather_msg}")
+
+# ==========================================
+# 3. イベント・コマンド処理
+# ==========================================
+bot = MyBot()
+
+@bot.event
+async def on_ready():
+    # ステータスを設定（「/help をプレイ中」と表示される）
+    await bot.change_presence(activity=discord.Game(name="/help を入力してね"))
+    print(f"Logged in as {bot.user.name}")
+
 @bot.event
 async def on_member_join(member):
     if CHANNEL_ID:
         channel = bot.get_channel(CHANNEL_ID)
-        if channel:
-            await channel.send(f"いらっしゃいませ！ {member.mention} さん、サーバーへようこそ！🎉")
+        if channel: await channel.send(f"ようこそ {member.mention} さん！🎉")
 
-# --- 5. 起動時処理 ---
-@bot.event
-async def on_ready():
-    print(f"--- 起動完了: {bot.user.name} ---")
-    # 参加しているサーバー名を出力（確認用）
-    for guild in bot.guilds:
-        print(f"参加中のサーバー: {guild.name}")
-    
-    if not scheduled_announcements.is_running():
-        scheduled_announcements.start()
-
-# ボットの起動
-if TOKEN:
-    bot.run(TOKEN)
-else:
-    print("エラー: DISCORD_BOT_TOKEN が設定されていません。")
-
-import discord
-from discord.ext import commands, tasks
-from datetime import datetime, date
-import os
-import requests # 天気取得用に追加
-from flask import Flask
-import threading
-
-# --- 1. Render用ダミーサーバー ---
-app = Flask('')
-@app.route('/')
-def home(): return "Bot is running!"
-def run_web(): app.run(host='0.0.0.0', port=8080)
-threading.Thread(target=run_web).start()
-
-# --- 2. 設定 ---
-intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID")) if os.getenv("CHANNEL_ID") else None
-
-# カウントダウンの目標日 (例: 2026年1月1日)
-TARGET_DATE = date(2026, 1, 1) 
-# 天気予報の地域コード (130000 は東京都)
-AREA_CODE = "130000" 
-
-# --- 3. 複雑な条件の通知タスク ---
-@tasks.loop(seconds=60)
-async def super_announcement():
-    if CHANNEL_ID is None: return
-    
-    now = datetime.now()
-    current_time = now.strftime('%H:%M')
-    channel = bot.get_channel(CHANNEL_ID)
-    if not channel: return
-
-    # 毎日朝 08:00 に実行
-    if current_time == "08:00":
-        
-        # 【機能2: 特定の日付 (例: お正月)】
-        if now.month == 1 and now.day == 1:
-            await channel.send("🌅 あけましておめでとうございます！今年もよろしくお願いします！")
-
-        # 【機能3: カウントダウン】
-        today = date.today()
-        diff = (TARGET_DATE - today).days
-        if diff > 0:
-            await channel.send(f"📅 【カウントダウン】目標の日まであと {diff} 日です！")
-        elif diff == 0:
-            await channel.send("🎊 【当日】ついに目標の日が来ました！")
-
-        # 【機能4: 天気予報 (気象庁APIから取得)】
-        try:
-            url = f"https://www.jma.go.jp/bosai/forecast/data/forecast/{AREA_CODE}.json"
-            response = requests.get(url)
-            data = response.json()
-            # 明日の天気予報を取得
-            weather_text = data[0]['timeSeries'][0]['areas'][0]['weathers'][0]
-            
-            msg = f"☀️ 今日の天気予報：{weather_text}\n"
-            if "雨" in weather_text:
-                msg += "☔ 今日は雨が降りそうです。傘を忘れずに！"
-            await channel.send(msg)
-        except Exception as e:
-            print(f"天気取得エラー: {e}")
-
-# --- 4. 起動時・入室時 ---
-@bot.event
-async def on_member_join(member):
-    channel = bot.get_channel(CHANNEL_ID)
-    if channel: await channel.send(f"ようこそ {member.mention} さん！🎉")
-
-@bot.event
-async def on_ready():
-    print(f"起動完了: {bot.user.name}")
-    if not super_announcement.is_running():
-        super_announcement.start()
-
-bot.run(TOKEN)
-
-# --- コードの上のほう（intents設定のあたり）に追加 ---
-from discord import app_commands # スラッシュコマンド用
-
-# --- ボットクラスの定義のすぐ下に追加 ---
-tree = bot.tree
-
-# --- 2. スラッシュコマンド /help の作成 ---
-@tree.command(name="help", description="ボットの使い方を表示します")
+# スラッシュコマンド /help
+@bot.tree.command(name="help", description="機能一覧を表示します")
 async def help_command(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🤖 ボット機能ガイド",
-        description="このボットで利用可能な機能一覧です。",
-        color=discord.Color.blue()
-    )
-    embed.add_field(name="/help", value="このメニューを表示します", inline=False)
-    embed.add_field(name="毎日 08:00", value="天気予報とカウントダウンを通知します", inline=False)
-    embed.add_field(name="毎日 12:00", value="お昼の挨拶をします", inline=False)
-    embed.add_field(name="毎月 1日", value="コミュニティの設立月数をお祝いします", inline=False)
-    embed.add_field(name="自動入室挨拶", value="新しいメンバーに挨拶します", inline=False)
-    
+    embed = discord.Embed(title="🤖 ボット機能ガイド", color=discord.Color.blue())
+    embed.add_field(name="/help", value="このメニューを表示", inline=False)
+    embed.add_field(name="朝 08:00", value="天気とカウントダウン通知", inline=False)
+    embed.add_field(name="目標日", value=f"{TARGET_DATE}", inline=False)
     await interaction.response.send_message(embed=embed)
 
-# --- 3. 起動時にコマンドを「同期」させる設定 ---
-# on_ready の中身を以下のように書き換えてください
-@bot.event
-async def on_ready():
-    # スラッシュコマンドをDiscord側に登録する「同期」作業
-    await tree.sync()
-    print(f"--- 起動完了: {bot.user.name} ---")
-    print("スラッシュコマンドの同期が完了しました")
-    if not super_announcement.is_running():
-        super_announcement.start()
+# ==========================================
+# 4. 実行
+# ==========================================
+if __name__ == "__main__":
+    # Webサーバーを別スレッドで起動
+    threading.Thread(target=run_web).start()
+    # ボット起動
+    if TOKEN:
+        bot.run(TOKEN)
+    else:
+        print("TOKENが見つかりません。Environment設定を確認してください。")
