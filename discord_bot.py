@@ -103,6 +103,30 @@ if __name__ == "__main__":
     if TOKEN:
         bot.run(TOKEN)
 
+# スラッシュコマンド /clear
+@bot.tree.command(name="clear", description="指定した数のメッセージを削除します")
+@app_commands.describe(amount="削除するメッセージの数（1〜100）")
+@app_commands.checks.has_permissions(manage_messages=True) # メッセージ管理権限がある人のみ実行可能
+async def clear_command(interaction: discord.Interaction, amount: int):
+    # 数が多すぎたり少なすぎたりしないかチェック
+    if amount < 1 or amount > 100:
+        await interaction.response.send_message("1から100の間で指定してください。", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True) # 「考え中...」を表示
+    
+    # メッセージを削除
+    deleted = await interaction.channel.purge(limit=amount)
+    
+    await interaction.followup.send(f"🧹 {len(deleted)} 件のメッセージを削除しました！", ephemeral=True)
+
+# 権限エラーが起きた時の処理
+@clear_command.error
+async def clear_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("このコマンドを実行する権限（メッセージの管理）がありません。", ephemeral=True)
+
+
 
 
 
