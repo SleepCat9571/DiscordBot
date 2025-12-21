@@ -65,7 +65,7 @@ class MyBot(commands.Bot):
             await channel.send(f"【朝の定期連絡】\n{countdown_msg}\n{weather_msg}")
 
         # 【昼 12:00】お昼の挨拶
-        if current_time == "12:21":
+        if current_time == "12:26":
             await channel.send("🕛 12時になりました。お昼ご飯を食べて、午後も頑張りましょう！")
 
         # 【毎月1日 09:00】記念日通知
@@ -102,4 +102,5 @@ if __name__ == "__main__":
     threading.Thread(target=run_web).start()
     if TOKEN:
         bot.run(TOKEN)
+
 
