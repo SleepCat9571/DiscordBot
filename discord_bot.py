@@ -16,8 +16,6 @@ LOG_CH = int(os.getenv("LOG_CHANNEL_ID")) if os.getenv("LOG_CHANNEL_ID") else No
 WELCOME_CH = int(os.getenv("WELCOME_CHANNEL_ID")) if os.getenv("WELCOME_CHANNEL_ID") else None
 PROXY = os.getenv("PROXY_URL") 
 
-BAD_WORDS = ["死ね", "殺す", "バカ", "ゴミ", "カス"]
-
 # yt-dlp オプション（プロキシ対応）
 YDL_OPTIONS = {
     'format': 'bestaudio/best',
@@ -128,3 +126,4 @@ async def stop(interaction: discord.Interaction):
 if __name__ == "__main__":
     threading.Thread(target=run_web).start()
     if TOKEN: bot.run(TOKEN)
+
