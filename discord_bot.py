@@ -17,7 +17,6 @@ MAIN_CH = int(os.getenv("CHANNEL_ID")) if os.getenv("CHANNEL_ID") else None
 LOG_CH = int(os.getenv("LOG_CHANNEL_ID")) if os.getenv("LOG_CHANNEL_ID") else None
 WELCOME_CH = int(os.getenv("WELCOME_CHANNEL_ID")) if os.getenv("WELCOME_CHANNEL_ID") else None
 
-BAD_WORDS = ["死ね", "殺す", "バカ", "ゴミ", "カス"]
 WEATHER_AREAS = {
     "北海道": "016000", "東　北": "040000", "関　東": "130000",
     "関　西": "270000", "中　国": "340000", "四　国": "370000", "九州沖縄": "400000"
@@ -50,7 +49,7 @@ class MyBot(commands.Bot):
         print(f"✅ {self.user.name} 起動完了")
         await self.change_presence(activity=discord.Game(name="/help をチェック！"))
 
-    # --- 定期タスク (天気・挨拶) ---
+# --- 定期タスク (天気・挨拶) をサイレントに修正 ---
     @tasks.loop(seconds=60)
     async def scheduled_task(self):
         jst = timezone(timedelta(hours=9), 'JST')
@@ -62,7 +61,7 @@ class MyBot(commands.Bot):
 
         # 朝 08:00 の全国天気
         if current_time == "08:00":
-            msg = "🌅 全国の天気予報です\n"
+            msg = "@silent 🌅 **全国の天気予報です**\n" # @silentを追加
             for area, code in WEATHER_AREAS.items():
                 try:
                     url = f"https://www.jma.go.jp/bosai/forecast/data/forecast/{code}.json"
@@ -73,9 +72,44 @@ class MyBot(commands.Bot):
 
         # 昼 12:00 の挨拶
         if current_time == "12:00":
-            await channel.send("🕛 12時になりました。お昼休憩にしましょう！☕")
+            await channel.send("@silent 🕛 12時になりました。お昼休憩にしましょう！☕")
 
-bot = MyBot()
+# --- VC入退室ログをサイレントに修正 ---
+@bot.event
+async def on_voice_state_update(member, before, after):
+    ch = bot.get_channel(LOG_CH) or bot.get_channel(MAIN_CH)
+    if not ch: return
+    if before.channel is None and after.channel is not None:
+        # 通知音なしでメッセージのみ送信
+        await ch.send(f"@silent 🎤 **{member.display_name}** が **{after.channel.name}** に参加しました")
+    elif before.channel is not None and after.channel is None:
+        await ch.send(f"@silent 👋 **{member.display_name}** が **{before.channel.name}** から退出しました")
+
+# --- 管理ログ（削除・ミュート）もサイレントに修正 ---
+@bot.event
+async def on_message(message):
+    if message.author.bot: return
+    if any(word in message.content for word in BAD_WORDS):
+        try:
+            await message.author.timeout(timedelta(minutes=10))
+            await message.delete()
+            log = bot.get_channel(LOG_CH) or message.channel
+            # ミュートの通知も静かに
+            await log.send(f"@silent 🛡️ {message.author.mention} を禁止用語使用でミュートしました。")
+            return
+        except: pass
+    await bot.process_commands(message)
+
+# メッセージ削除ログもサイレントに
+@bot.tree.command(name="clear", description="メッセージ削除")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def clear(interaction: discord.Interaction, amount: int):
+    await interaction.response.defer(ephemeral=True)
+    deleted = await interaction.channel.purge(limit=amount)
+    log = bot.get_channel(LOG_CH)
+    if log: 
+        await log.send(f"@silent 🧹 {interaction.user.name} が {len(deleted)}件削除しました。")
+    await interaction.followup.send(f"✅ {len(deleted)}件削除しました。", ephemeral=True)
 
 # --- 4. イベント処理 ---
 
@@ -154,3 +188,4 @@ async def clear(interaction: discord.Interaction, amount: int):
 if __name__ == "__main__":
     threading.Thread(target=run_web).start()
     if TOKEN: bot.run(TOKEN)
+
